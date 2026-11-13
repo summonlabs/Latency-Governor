@@ -72,13 +72,30 @@ std::optional<std::uint64_t> PolicyStore::add(Policy p, std::string& error) {
     p.id = next_generation_;
     p.generation = next_generation_;
     ++next_generation_;
+    return insert(std::move(p));
+}
+
+std::optional<std::uint64_t> PolicyStore::restore(Policy p, std::string& error) {
+    if (!p.validate(error)) return std::nullopt;
+    if (p.generation == 0 || (!by_generation_.empty() && p.generation <= by_generation_.rbegin()->first)) {
+        error = "restored policy generation must be positive and increasing";
+        return std::nullopt;
+    }
+    if (p.generation >= next_generation_) next_generation_ = p.generation + 1;
+    return insert(std::move(p));
+}
+
+std::uint64_t PolicyStore::insert(Policy p) {
     // Bound the retained history.
     if (policies_.size() >= max_retained_) {
-        // Drop oldest policy (lowest generation).
+        // Drop oldest policy (lowest generation) and re-point the remaining
+        // generations at their shifted positions.
         auto it = by_generation_.begin();
         if (it != by_generation_.end()) {
+            const std::size_t gone = it->second;
             by_generation_.erase(it);
-            policies_.erase(policies_.begin());
+            policies_.erase(policies_.begin() + static_cast<std::ptrdiff_t>(gone));
+            for (auto& kv : by_generation_) if (kv.second > gone) --kv.second;
         }
     }
     const std::size_t idx = policies_.size();

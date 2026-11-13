@@ -335,6 +335,14 @@ ObservationResult Governor::observe(const Observation& obs) {
         ++impl_->metrics.observations_rejected;
         return r;
     }
+    // Lifecycle eligibility: a terminal request (kept as history) is never
+    // mutated or revived by a late or replayed observation.
+    if (rs.is_terminal()) {
+        r.code = RejectionCode::STATE_INELIGIBLE; r.detail = "request is terminal";
+        ++impl_->metrics.stale_rejections[enum_index(r.code)];
+        ++impl_->metrics.observations_rejected;
+        return r;
+    }
     if (obs.id.value() == 0) { /* id is optional; assign if zero */ }
 
     const TimePoint now = clock_.now();
@@ -1311,7 +1319,8 @@ bool Governor::decode_state(std::string_view blob, std::string& error) {
         impl_->next_attempt = na; impl_->next_generation = ng;
         impl_->next_observation = no; impl_->next_reservation = nr;
         impl_->policy_store = PolicyStore();
-        for (const auto& p : new_policies) { std::string perr; impl_->policy_store.add(p, perr); }
+        // Persisted policies keep their generations (add() would renumber them).
+        for (const auto& p : new_policies) { std::string perr; impl_->policy_store.restore(p, perr); }
         impl_->predictor = std::move(temp_pred);
         impl_->fairness = FairnessTracker(impl_->config.max_tenant);
         impl_->completion_order.clear();

@@ -104,6 +104,10 @@ struct Policy {
 class PolicyStore {
 public:
     std::optional<std::uint64_t> add(Policy p, std::string& error);
+    // Re-inserts a persisted policy with its recorded generation (recovery).
+    // Generations must arrive in increasing order; later add() calls continue
+    // after the highest restored generation.
+    std::optional<std::uint64_t> restore(Policy p, std::string& error);
     [[nodiscard]] std::optional<std::uint64_t> current_generation() const noexcept;
     [[nodiscard]] const Policy* get(std::uint64_t generation) const noexcept;
     [[nodiscard]] const Policy* current() const noexcept;
@@ -117,6 +121,8 @@ public:
     void compact(std::string& error);
 
 private:
+    std::uint64_t insert(Policy p);
+
     std::vector<Policy> policies_;
     std::map<std::uint64_t, std::size_t> by_generation_;
     std::size_t max_retained_ = 32;

@@ -229,6 +229,16 @@ void encode_admit(BinaryWriter& w, const RequestDescriptor& d) {
     w.u32(d.prompt_tokens); w.u32(d.max_tokens); w.u32(d.remaining_tokens);
     w.bool_(d.backend_hint.has_value()); if (d.backend_hint) w.id(*d.backend_hint);
     w.enums_raw(static_cast<std::uint32_t>(d.device_hint)); w.bool_(d.warm_cache_hint);
+    // The request's explicit latency contract (the coordinator assigns policy_id).
+    const LatencyContract& c = d.contract;
+    w.duration(c.e2e_target); write_optional_duration(w, c.hard_deadline);
+    w.duration(c.ttf_target); w.duration(c.max_queue_residence); w.duration(c.max_dispatch_delay);
+    w.duration(c.prefill_target); w.duration(c.decode_step_target); w.duration(c.transfer_allowance);
+    w.duration(c.retry_allowance); w.duration(c.max_retry_delay); w.duration(c.max_spec_overhead);
+    write_double_local(w, c.deadline_risk_threshold); write_double_local(w, c.min_completion_probability);
+    write_double_local(w, c.intervention_aggressiveness); write_double_local(w, c.fairness_weight);
+    w.enums_raw(static_cast<std::uint32_t>(c.admission_policy)); w.enums_raw(static_cast<std::uint32_t>(c.cancellation_policy));
+    w.bool_(c.degradation_allowed);
 }
 bool decode_admit(BinaryReader& r, RequestDescriptor& d) {
     if (!r.id(d.request_id) || !r.id(d.tenant_id) || !r.id(d.model_id) || !r.id(d.model_revision)) return false;
@@ -237,7 +247,18 @@ bool decode_admit(BinaryReader& r, RequestDescriptor& d) {
     if (!r.u32(d.prompt_tokens) || !r.u32(d.max_tokens) || !r.u32(d.remaining_tokens)) return false;
     if (!r.bool_(has)) return false; d.backend_hint.reset(); if (has) { BackendId b; if (!r.id(b)) return false; d.backend_hint = b; }
     std::uint32_t dh; if (!r.enums_raw(dh) || dh >= DeviceClass_count) return false; d.device_hint = static_cast<DeviceClass>(dh);
-    return r.bool_(d.warm_cache_hint);
+    if (!r.bool_(d.warm_cache_hint)) return false;
+    LatencyContract& c = d.contract;
+    if (!r.duration(c.e2e_target) || !read_optional_duration(r, c.hard_deadline)) return false;
+    if (!r.duration(c.ttf_target) || !r.duration(c.max_queue_residence) || !r.duration(c.max_dispatch_delay)) return false;
+    if (!r.duration(c.prefill_target) || !r.duration(c.decode_step_target) || !r.duration(c.transfer_allowance)) return false;
+    if (!r.duration(c.retry_allowance) || !r.duration(c.max_retry_delay) || !r.duration(c.max_spec_overhead)) return false;
+    if (!read_double_local(r, c.deadline_risk_threshold) || !read_double_local(r, c.min_completion_probability)) return false;
+    if (!read_double_local(r, c.intervention_aggressiveness) || !read_double_local(r, c.fairness_weight)) return false;
+    std::uint32_t ap, cp;
+    if (!r.enums_raw(ap) || ap >= AdmissionPolicy_count || !r.enums_raw(cp) || cp >= CancellationPolicy_count) return false;
+    c.admission_policy = static_cast<AdmissionPolicy>(ap); c.cancellation_policy = static_cast<CancellationPolicy>(cp);
+    return r.bool_(c.degradation_allowed);
 }
 
 void encode_admit_ack(BinaryWriter& w, bool accepted, RejectionCode code, RequestId id, AttemptId attempt, Generation gen, CoordinatorEpoch epoch, std::string msg) {
